@@ -90,15 +90,16 @@ func (s service) GetForumThreads(input models.ForumGetThreads) ([]models.Thread,
 }
 
 func (s service) GetForumUsers(input models.ForumGetUsers) ([]models.User, error) {
-	forumID, err := s.forumStorage.GetForumID(models.ForumInput{Slug: input.Slug})
+	_, err := s.forumStorage.GetForumID(models.ForumInput{Slug: input.Slug})
 	if err != nil {
 		return []models.User{}, err
 	}
 
+
 	if input.Limit == 0 {
 		input.Limit = math.MaxInt32
 	}
-	return s.userStorage.GetUsers(input, forumID)
+	return s.userStorage.GetUsers(input, input.Slug)
 }
 
 func (s service) CreateUser(input models.User) ([]models.User, error) {
@@ -154,12 +155,13 @@ func (s service) CreateThread(input models.Thread) (models.Thread, error) {
 		if err != nil {
 			return models.Thread{}, err
 		}
-		userID, err := s.userStorage.GetUserIDByNickname(input.Author)
+
+		userID, err := s.userStorage.GetUserByNickname(input.Author)
 		if err != nil {
 			return models.Thread{}, err
 		}
 
-		forumID, err := s.forumStorage.GetForumID(models.ForumInput{Slug: input.Forum})
+		forumID, err := s.forumStorage.GetForumSlug(input.Forum)
 		if err != nil {
 			return models.Thread{}, err
 		}

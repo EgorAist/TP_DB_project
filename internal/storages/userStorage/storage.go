@@ -1,6 +1,7 @@
 package userStorage
 
 import (
+	"fmt"
 	//"fmt"
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx"
@@ -11,9 +12,11 @@ type Storage interface {
 	CreateUser(input models.User) (user models.User, err error)
 	GetProfile(input string) (user models.User, err error)
 	UpdateProfile(input models.User) (user models.User, err error)
-	GetUsers(input models.ForumGetUsers, forumID int) (users []models.User, err error)
+	GetUsers(input models.ForumGetUsers, forum string) (users []models.User, err error)
+
 	GetUserForPost(input string,  user *models.User) (err error)
 	GetUserIDByNickname(input string) (userID int, err error)
+	GetUserByNickname(input string) (nickname string, err error)
 	GetEmailConflictUser(email string) (user models.User, err error)
 }
 
@@ -28,10 +31,11 @@ func NewStorage(db *pgx.ConnPool) Storage {
 }
 
 var (
-	selectEmpty = "SELECT u.nickname, u.fullname, u.about, u.email FROM forum_users fu JOIN users u ON fu.userID = u.ID WHERE fu.forumID = $1 ORDER BY u.nickname LIMIT $2"
-	selectWithSince = "SELECT u.nickname, u.fullname, u.about, u.email FROM forum_users fu JOIN users u ON fu.userID = u.ID WHERE fu.forumID = $1 AND u.nickname > $2 ORDER BY u.nickname LIMIT $3"
-	selectWithDesc = "SELECT u.nickname, u.fullname, u.about, u.email FROM forum_users fu JOIN users u ON fu.userID = u.ID WHERE fu.forumID = $1 ORDER BY u.nickname DESC LIMIT $2"
-	selectWithSinceDesc =  "SELECT u.nickname, u.fullname, u.about, u.email FROM forum_users fu JOIN users u ON fu.userID = u.ID WHERE fu.forumID = $1 AND u.nickname < $2 ORDER BY u.nickname DESC LIMIT $3"
+
+	selectEmpty = "SELECT u.nickname, u.fullname, u.about, u.email FROM forum_users fu JOIN users u ON fu.nickname = u.nickname WHERE fu.forum = $1 ORDER BY u.nickname LIMIT $2"
+	selectWithSince = "SELECT u.nickname, u.fullname, u.about, u.email FROM forum_users fu JOIN users u ON fu.nickname = u.nickname WHERE fu.forum = $1 AND u.nickname > $2 ORDER BY u.nickname LIMIT $3"
+	selectWithDesc = "SELECT u.nickname, u.fullname, u.about, u.email FROM forum_users fu JOIN users u ON fu.nickname = u.nickname WHERE fu.forum = $1 ORDER BY u.nickname DESC LIMIT $2"
+	selectWithSinceDesc =  "SELECT u.nickname, u.fullname, u.about, u.email FROM forum_users fu JOIN users u ON fu.nickname = u.nickname WHERE fu.forum = $1 AND u.nickname < $2 ORDER BY u.nickname DESC LIMIT $3"
 
 	updateFull = "UPDATE users SET nickname = $1, fullname = $2, email = $3, about = $4 WHERE nickname = $5 RETURNING fullname, email, about, nickname"
 	updateEmail = "UPDATE users SET nickname = $1, email = $2 WHERE nickname = $3 RETURNING fullname, email, about, nickname"
@@ -42,9 +46,24 @@ var (
 	updateFullnameAbout = "UPDATE users SET nickname = $1, fullname = $2, about = $3 WHERE nickname = $4 RETURNING fullname, email, about, nickname"
 )
 
+func (s storage) GetUserByNickname(input string) (nickname string, err error) {
+	err = s.db.QueryRow("SELECT nickname FROM users WHERE nickname = $1", input).Scan(&nickname)
+	if err != nil {
+		if pgerr, ok := err.(pgx.PgError); ok {
+			if pgerr == pgx.ErrNoRows {
+				return nickname, models.Error{Code: "404"}
+
+			}
+		}
+		return nickname, models.Error{Code: "500"}
+	}
+
+	return
+}
+
 func (s *storage) CreateUser(input models.User) (user models.User, err error) {
 	_, err = s.db.Exec("INSERT INTO users (nickname, email, fullname, about) VALUES ($1, $2, $3, $4)",
-						input.Nickname, input.Email, input.Fullname, input.About)
+		input.Nickname, input.Email, input.Fullname, input.About)
 
 	if pqErr, ok := err.(pgx.PgError); ok {
 		switch pqErr.Code {
@@ -65,7 +84,7 @@ func (s *storage) CreateUser(input models.User) (user models.User, err error) {
 
 func (s *storage) GetProfile(input string) (user models.User, err error) {
 	err = s.db.QueryRow("SELECT fullname, email, about, nickname FROM users WHERE nickname = $1", input).
-				Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
+		Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -81,25 +100,25 @@ func (s *storage) GetProfile(input string) (user models.User, err error) {
 func (s *storage) UpdateProfile(input models.User) (user models.User, err error) {
 	if input.About != "" && input.Email != "" && input.Fullname != "" {
 		err = s.db.QueryRow(updateFull, input.Nickname, input.Fullname, input.Email, input.About, input.Nickname).
-					Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
+			Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
 	} else if input.About != "" && input.Email != "" {
 		err = s.db.QueryRow(updateEmailAbout, input.Nickname, input.Email, input.About, input.Nickname).
-					Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
+			Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
 	} else if input.Email != "" && input.Fullname != "" {
 		err = s.db.QueryRow(updateEmailFullname, input.Nickname, input.Fullname, input.Email, input.Nickname).
-					Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
+			Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
 	} else if input.About != "" && input.Fullname != "" {
 		err = s.db.QueryRow(updateFullnameAbout, input.Nickname, input.Fullname, input.About, input.Nickname).
-					Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
+			Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
 	} else if input.About != "" {
 		err = s.db.QueryRow(updateAbout, input.Nickname, input.About, input.Nickname).
-					Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
+			Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
 	} else if input.Fullname != "" {
 		err = s.db.QueryRow(updateFullname, input.Nickname, input.Fullname, input.Nickname).
-					Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
+			Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
 	} else if input.Email != "" {
 		err = s.db.QueryRow(updateEmail, input.Nickname, input.Email, input.Nickname).
-					Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
+			Scan(&user.Fullname, &user.Email, &user.About, &user.Nickname)
 	}
 
 	if err == pgx.ErrNoRows {
@@ -118,20 +137,23 @@ func (s *storage) UpdateProfile(input models.User) (user models.User, err error)
 	return
 }
 
-func (s *storage) GetUsers(input models.ForumGetUsers, forumID int) (users []models.User, err error) {
+func (s *storage) GetUsers(input models.ForumGetUsers, forum string) (users []models.User, err error) {
+
+	//func (s *storage) GetUsers(input models.ForumGetUsers, forumID int) (users []models.User, err error) {
 	var rows *pgx.Rows
 	users = make([]models.User, 0)
 	if input.Since == "" && !input.Desc {
-		rows, err = s.db.Query(selectEmpty, forumID, input.Limit)
+		rows, err = s.db.Query(selectEmpty, forum, input.Limit)
 	} else if input.Since == "" && input.Desc {
-		rows, err = s.db.Query(selectWithDesc, forumID, input.Limit)
+		rows, err = s.db.Query(selectWithDesc, forum, input.Limit)
 	}  else if input.Since != "" && !input.Desc {
-		rows, err = s.db.Query(selectWithSince, forumID, input.Since, input.Limit)
+		rows, err = s.db.Query(selectWithSince, forum, input.Since, input.Limit)
 	} else if input.Since != "" && input.Desc {
-		rows, err = s.db.Query(selectWithSinceDesc, forumID, input.Since, input.Limit)
+		rows, err = s.db.Query(selectWithSinceDesc, forum, input.Since, input.Limit)
 	}
 
 	if err != nil {
+		fmt.Println(err)
 		return users, models.Error{Code: "500"}
 	}
 
@@ -140,8 +162,10 @@ func (s *storage) GetUsers(input models.ForumGetUsers, forumID int) (users []mod
 	for rows.Next() {
 		user := models.User{}
 
+
 		err = rows.Scan(&user.Nickname, &user.Fullname, &user.About, &user.Email)
 		if err != nil {
+			fmt.Println(err)
 			return users, models.Error{Code: "500"}
 		}
 

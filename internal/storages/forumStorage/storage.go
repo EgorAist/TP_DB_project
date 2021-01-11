@@ -11,7 +11,9 @@ type Storage interface {
 	GetDetails(forumSlug models.ForumInput) (forum models.Forum, err error)
 	UpdateThreadsCount(input models.ForumInput) (err error)
 	UpdatePostsCount(input models.ForumInput, posts int) (err error)
-	AddUserToForum(userID int, forumID int) (err error)
+//	AddUserToForum(userID int, forumID int) (err error)
+	GetForumSlug(slug string) (string, error)
+	AddUserToForum(user string, forum string) (err error)
 	CheckIfForumExists(input models.ForumInput) (err error)
 	GetForumID(input models.ForumInput) (ID int, err error)
 	GetForumForPost(forumSlug string, forum *models.Forum) (err error)
@@ -75,7 +77,7 @@ func (s *storage) UpdatePostsCount(input models.ForumInput, posts int) (err erro
 	}
 	return
 }
-
+/*
 func (s *storage) AddUserToForum(userID int, forumID int) (err error) {
 	_, err = s.db.Exec("INSERT INTO forum_users (forumID, userID) VALUES ($1, $2)", forumID, userID)
 	if err != nil {
@@ -90,6 +92,23 @@ func (s *storage) AddUserToForum(userID int, forumID int) (err error) {
 
 	return
 }
+*/
+
+func (s *storage) AddUserToForum(user string, forum string) (err error) {
+	_, err = s.db.Exec("INSERT INTO forum_users (forum, nickname) VALUES ($1, $2)", forum, user)
+	if err != nil {
+		if pqErr, ok := err.(pgx.PgError); ok {
+			switch pqErr.Code {
+			case pgerrcode.UniqueViolation:
+				return models.Error{Code: "409"}
+			}
+		}
+		return models.Error{Code: "500"}
+	}
+
+	return
+}
+
 
 func (s *storage) CheckIfForumExists(input models.ForumInput) (err error) {
 	var ID int
@@ -114,6 +133,18 @@ func (s storage) GetForumID(input models.ForumInput) (ID int, err error) {
 	}
 
 	return
+}
+func (s storage) GetForumSlug(slug string) (string, error) {
+	var rightSlug string
+	err := s.db.QueryRow("SELECT slug from forums WHERE slug = $1", slug).Scan(&rightSlug)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return rightSlug, models.Error{Code: "404"}
+		}
+		return rightSlug, models.Error{Code: "500"}
+	}
+
+	return rightSlug, nil
 }
 
 func (s *storage) GetForumForPost(forumSlug string, forum *models.Forum) (err error) {

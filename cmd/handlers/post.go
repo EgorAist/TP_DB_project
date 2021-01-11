@@ -5,9 +5,11 @@ import (
 	"github.com/EgorAist/TP_DB_project/internal/models"
 	"github.com/valyala/fasthttp"
 	"log"
+	"net/http"
 	"strconv"
 	"time"
 )
+
 
 func (h handler) PostsCreate(c *fasthttp.RequestCtx) {
 	postsInput := make([]models.PostCreate, 0)
@@ -37,21 +39,22 @@ func (h handler) PostsCreate(c *fasthttp.RequestCtx) {
 		return
 	}
 
+	creator := postsInput[0].Author
 	created := time.Now().Format(time.RFC3339Nano)
 	posts, err = h.Posts.CreatePosts(threadInput, forum, created, postsInput)
+
 	if err != nil {
-		if err.Error() == "404" {
+		_, errUser := h.Users.GetUserByNickname(creator)
+		if errUser != nil {
+			_, respErr, _ := h.ConvertError(errUser)
+			h.WriteResponse(c, http.StatusNotFound, respErr)
+			return
+		}
+		if err.Error() == "409" {
 			status, respErr, _ := h.ConvertError(err)
 			h.WriteResponse(c, status, respErr)
 			return
 		}
-		status, respErr, _ := h.ConvertError(err)
-		h.WriteResponse(c, status, respErr)
-		return
-	}
-
-	err = h.Forums.UpdatePostsCount(models.ForumInput{Slug: forum}, len(posts))
-	if err != nil {
 		status, respErr, _ := h.ConvertError(err)
 		h.WriteResponse(c, status, respErr)
 		return

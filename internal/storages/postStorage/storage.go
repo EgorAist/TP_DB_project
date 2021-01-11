@@ -1,11 +1,10 @@
 package postStorage
 
 import (
-	"errors"
+	"fmt"
+	"github.com/EgorAist/TP_DB_project/internal/models"
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx"
-	"github.com/EgorAist/TP_DB_project/internal/models"
-	"strconv"
 	"strings"
 )
 
@@ -29,100 +28,60 @@ func NewStorage(db *pgx.ConnPool) Storage {
 }
 
 func (s storage) CreatePosts(thread models.ThreadInput, forum string, created string, posts []models.PostCreate) (post []models.Post, err error) {
-	sqlStr := "INSERT INTO posts(id, parent, thread, forum, author, created, message, path) VALUES "
-	vals := []interface{}{}
-	for _, post := range posts {
-		var authorID int
-		err = s.db.QueryRow(`SELECT id FROM users WHERE nickname = $1`,
-			post.Author,
-		).Scan(&authorID)
-		if err != nil {
-			return nil, models.Error{Code: "404", Message: "cannot find user"}
-		}
-
-		var forumID int
-		err = s.db.QueryRow(`SELECT id FROM forums WHERE slug = $1`,
-			forum,
-		).Scan(&forumID)
-		if err != nil {
-			return nil, models.Error{Code: "404", Message: "cannot find thread"}
-		}
-
-		sqlQuery := `
-		INSERT INTO forum_users (forumID, userID)
-		VALUES ($1,$2)`
-		_, err = s.db.Exec(sqlQuery, forumID, authorID)
-		if err != nil {
-			if pqErr, ok := err.(pgx.PgError); ok {
-				if pqErr.Code != pgerrcode.UniqueViolation {
-					return nil, errors.New("500")
-				}
-			}
-		}
-
-		if post.Parent == 0 {
-			sqlStr += "(nextval('post_id_seq'::regclass), ?, ?, ?, ?, ?, ?, " +
-				"ARRAY[currval(pg_get_serial_sequence('posts', 'id'))::INTEGER]),"
-			vals = append(vals, post.Parent, thread.ThreadID, forum, post.Author, created, post.Message)
-		} else {
-			var parentThreadId int32
-			err = s.db.QueryRow("SELECT thread FROM posts WHERE id = $1",
-				post.Parent,
-			).Scan(&parentThreadId)
-			if err != nil {
-				return nil, models.Error{Code: "409", Message: "Parent post was created in another thread"}
-			}
-			if parentThreadId != int32(thread.ThreadID) {
-				return nil, models.Error{Code: "409", Message: "Parent post was created in another thread"}
-			}
-
-			sqlStr += " (nextval('post_id_seq'::regclass), ?, ?, ?, ?, ?, ?, " +
-				"(SELECT posts.path FROM posts WHERE posts.id = ? AND posts.thread = ?) || " +
-				"currval(pg_get_serial_sequence('posts', 'id'))::INTEGER),"
-
-			vals = append(vals, post.Parent, thread.ThreadID, forum, post.Author, created, post.Message, post.Parent, thread.ThreadID)
-		}
-
+	query := `INSERT INTO posts(
+                 author,
+                 created,
+                 message,
+                 parent,
+				 thread,
+				 forum) VALUES `
+	data := make([]models.Post, 0, 0)
+	if len(posts) == 0 {
+		return data, nil
 	}
-	sqlStr = strings.TrimSuffix(sqlStr, ",")
 
-	sqlStr += " RETURNING id, parent, thread, forum, author, created, message, edited "
 
-	sqlStr = ReplaceSQL(sqlStr, "?")
-	if len(posts) > 0 {
-		rows, err := s.db.Query(sqlStr, vals...)
-		if err != nil {
-			return nil, err
+	var valNam []string
+	var values []interface{}
+	i := 1
+	for _, element := range posts {
+		valNam = append(valNam, fmt.Sprintf(
+			"($%d, $%d, $%d, $%d, $%d, $%d)",
+			i, i+1, i+2, i+3, i+4, i+5))
+		i += 6
+		values = append(values, element.Author, created, element.Message, element.Parent, thread.ThreadID, forum)
+	}
+
+	query += strings.Join(valNam[:], ",")
+	query += " RETURNING  id, parent, thread, forum, author, created, message, edited"
+	row, err := s.db.Query(query, values...)
+	if err != nil {
+		fmt.Println(err)
+		return data, err
+	}
+
+	defer func() {
+		if row != nil {
+			row.Close()
 		}
+	}()
+
+	for row.Next() {
 		scanPost := models.Post{}
-		for rows.Next() {
-			err := rows.Scan(
-				&scanPost.ID,
-				&scanPost.Parent,
-				&scanPost.ThreadID,
-				&scanPost.Forum,
-				&scanPost.Author,
-				&scanPost.Created,
-				&scanPost.Message,
-				&scanPost.IsEdited,
-			)
-			if err != nil {
-				rows.Close()
-				return nil, err
-			}
-			post = append(post, scanPost)
-		}
-		rows.Close()
-	}
-	return post, nil
-}
+		// id, parent, thread, forum, author, created, message, edited
+		err = row.Scan(&scanPost.ID, &scanPost.Parent, &scanPost.ThreadID, &scanPost.Forum,  &scanPost.Author, &scanPost.Created,&scanPost.Message, &scanPost.IsEdited)
 
-func ReplaceSQL(old, searchPattern string) string {
-	tmpCount := strings.Count(old, searchPattern)
-	for m := 1; m <= tmpCount; m++ {
-		old = strings.Replace(old, searchPattern, "$"+strconv.Itoa(m), 1)
+		if err != nil {
+			fmt.Println(err)
+			return data, err
+		}
+		data = append(data, scanPost)
 	}
-	return old
+
+	if len(data) == 0 {
+		return data, models.Error{Code: "409"}
+	}
+	return data, err
 }
 
 func (s *storage) CreatePost(input models.Post) (post models.Post, err error) {
