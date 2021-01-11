@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS citext;
 
 DROP TABLE IF EXISTS users CASCADE;
-CREATE TABLE users
+CREATE UNLOGGED TABLE users
 (
     ID       SERIAL NOT NULL PRIMARY KEY,
     nickname CITEXT NOT NULL UNIQUE COLLATE "POSIX",
@@ -15,7 +15,7 @@ CREATE INDEX idx_nick_email ON users (email);
 CREATE INDEX idx_nick_cover ON users (nickname, fullname, about, email);
 
 DROP TABLE IF EXISTS forums CASCADE;
-CREATE TABLE forums
+CREATE UNLOGGED TABLE forums
 (
     ID        SERIAL                             NOT NULL PRIMARY KEY,
 
@@ -29,7 +29,7 @@ CREATE TABLE forums
 CREATE INDEX idx_forum_slug ON forums using hash(slug);
 
 DROP TABLE IF EXISTS threads CASCADE;
-CREATE TABLE threads
+CREATE UNLOGGED TABLE threads
 (
     ID      SERIAL                          NOT NULL PRIMARY KEY,
     author  CITEXT                          NOT NULL REFERENCES users (nickname),
@@ -47,7 +47,7 @@ CREATE INDEX idx_thread_coverage ON threads (forum, created, id, slug, author, t
 
 DROP TABLE IF EXISTS posts;
 DROP TABLE IF EXISTS forum_users;
-CREATE TABLE forum_users
+CREATE UNLOGGED TABLE forum_users
 (
     forumID INTEGER REFERENCES forums (ID),
     userID  INTEGER REFERENCES users (ID)
@@ -55,20 +55,22 @@ CREATE TABLE forum_users
 
 ALTER TABLE IF EXISTS forum_users ADD CONSTRAINT uniq UNIQUE (forumID, userID);
 CREATE INDEX idx_forum_user ON forum_users (forumID, userID);
+/*CREATE INDEX idx_forum_userID ON forum_users (userID);
+CREATE INDEX idx_forum_forumID ON forum_users (forumID);*/
 
 DROP TABLE IF EXISTS votes;
-CREATE TABLE votes
+CREATE UNLOGGED TABLE votes
 (
     user_nick CITEXT REFERENCES users (nickname) NOT NULL,
     voice BOOLEAN NOT NULL,
     thread  INTEGER REFERENCES threads (ID) NOT NULL
 );
 ALTER TABLE IF EXISTS votes ADD CONSTRAINT uniq_votes UNIQUE (user_nick, thread);
-CREATE INDEX idx_vote ON votes(thread, voice);
+CREATE INDEX idx_vote ON votes(thread, user_nick, voice);
 
 
 -----------------------------------------------------
-CREATE TABLE posts
+CREATE UNLOGGED TABLE posts
 (
     id      integer                                NOT NULL PRIMARY KEY,
     author  citext                                 NOT NULL REFERENCES users (nickname),
@@ -100,3 +102,7 @@ CREATE INDEX post_forum_index ON posts USING btree (forum);
 CREATE INDEX post_parent_index ON posts USING btree (parent);
 CREATE INDEX post_path_index ON posts USING gin (path);
 CREATE INDEX post_thread_index ON posts USING btree (thread);
+
+/*CREATE INDEX post_thread_id_index ON posts (thread, id); -- +
+CREATE INDEX post_first_parent_id_index ON posts (path, id);*/
+
